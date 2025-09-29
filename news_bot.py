@@ -29,7 +29,7 @@ def send_message(text: str):
         print("⚠️ Error sending message:", e)
 
 # --- NewsAPI ---
-RELEVANT_KEYWORDS = ["black soldier fly", "insect protein", "black soldier fly larvae","black soldier fly protein","black soldier fly oil",black soldier fly feed","black soldier fly fat","black soldier fly frass","black soldier fly substrate","black soldier fly alternate protein","black soldier fly fertilizer","black soldier fly egg","hermetia illucens" "black soldier fly research"]
+RELEVANT_KEYWORDS = ["black soldier fly", "insect protein", "black soldier fly larvae", "black soldier fly protein", "black soldier fly oil", "black soldier fly feed", "black soldier fly fat", "black soldier fly frass", "black soldier fly substrate", "black soldier fly alternate protein", "black soldier fly fertilizer", "black soldier fly egg", "hermetia illucens", "black soldier fly research"]
 
 def get_newsapi(query, max_results=5):
     news_list = []
