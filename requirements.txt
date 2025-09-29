@@ -1,5 +1,4 @@
+Flask
 requests
 schedule
-flask
 feedparser
-scholarly
