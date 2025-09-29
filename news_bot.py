@@ -9,7 +9,15 @@ from flask import Flask
 TOKEN = os.getenv("8197734769:AAE7H4C9NKBSOfhawzWlkAUU-aR7SprkdEg")
 CHAT_ID = os.getenv("-4957516199")
 NEWS_API_KEY = os.getenv("9e868126e0bf4be880d84539d58e15e8")
-TOPIC = os.getenv("TOPIC", "BSF companies research")  # optional env variable
+
+# Multiple search queries separated by commas
+TOPIC_QUERIES = os.getenv("TOPIC", "BSF research,BSF companies,Black Soldier Fly news").split(",")
+
+# Keywords to prioritize research articles
+RESEARCH_KEYWORDS = ["research", "journal", "study", "paper", "academic", "experiment", "scientific"]
+
+# Keep track of posted articles to avoid duplicates
+posted_urls = set()
 
 def send_message(text: str):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -17,24 +25,45 @@ def send_message(text: str):
     r = requests.post(url, data=payload)
     print("📤 Sent message:", r.json())
 
-def get_news(query=TOPIC, max_results=5):
+def get_news(query, max_results=5):
+    """Fetch latest news and prioritize research articles"""
     url = (
         f"https://newsapi.org/v2/everything?"
         f"q={query}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize={max_results}"
     )
     response = requests.get(url).json()
     articles = response.get("articles", [])
-    if not articles:
-        return f"⚠️ No news found for '{query}' today."
-    news_list = [f"📰 {a['title']} \n🔗 {a['url']}" for a in articles]
-    return "\n\n".join(news_list)
+    news_list = []
+
+    for a in articles:
+        if a['url'] in posted_urls:
+            continue
+
+        # Check if title or description contains research keywords
+        text_to_check = (a.get("title","") + " " + a.get("description","")).lower()
+        is_research = any(k.lower() in text_to_check for k in RESEARCH_KEYWORDS)
+
+        if is_research:
+            news_list.insert(0, f"🧪 {a['title']} \n🔗 {a['url']}")  # research on top
+        else:
+            news_list.append(f"📰 {a['title']} \n🔗 {a['url']}")  # general news
+
+        posted_urls.add(a['url'])
+
+    return news_list
 
 def job():
-    news_text = get_news(TOPIC, max_results=3)
-    send_message(news_text)
+    all_news = []
+    for query in TOPIC_QUERIES:
+        news = get_news(query.strip())
+        all_news.extend(news)
+    if all_news:
+        send_message("\n\n".join(all_news))
+    else:
+        print("⚠️ No new news to post at this time.")
 
 # ---- Scheduler ----
-schedule.every(4).hours.do(job)
+schedule.every(1).hours.do(job)  # every hour
 
 def run_schedule():
     job()  # send once immediately
