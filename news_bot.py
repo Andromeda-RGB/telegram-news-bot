@@ -12,16 +12,24 @@ CHAT_ID = os.getenv("CHAT_ID")          # Set this in Render environment
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")  # Set this in Render environment
 
 # Comma-separated search queries
-TOPIC_QUERIES = os.getenv("TOPIC", "Black soldier fly research,black soldier fly companies,Black Soldier Fly news, hermetia illucens, black soldier fly protein, black soldier fly frass, black soldier fly oil").split(",")
+TOPIC_QUERIES = os.getenv(
+    "TOPIC",
+    "Black soldier fly research,black soldier fly companies,Black Soldier Fly news, hermetia illucens, black soldier fly protein, black soldier fly frass, black soldier fly oil"
+).split(",")
 
 # Optional RSS feeds
 RSS_FEEDS = os.getenv("RSS_FEEDS", "").split(",")  # e.g., "https://www.bsf-company.com/rss,https://www.industrynews.com/rss"
 
 posted_urls = set()  # track posted URLs
 
-def send_message(text: str):
+def send_message(text: str, chat_id: str = None):
+    """Send message to Telegram chat"""
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+    payload = {
+        "chat_id": chat_id or CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML"
+    }
     try:
         r = requests.post(url, data=payload, timeout=10)
         print("📤 Sent message:", r.json())
@@ -29,7 +37,13 @@ def send_message(text: str):
         print("⚠️ Error sending message:", e)
 
 # --- NewsAPI ---
-RELEVANT_KEYWORDS = ["black soldier fly", "insect protein", "black soldier fly larvae", "black soldier fly protein", "black soldier fly oil", "black soldier fly feed", "black soldier fly fat", "black soldier fly frass", "black soldier fly substrate", "black soldier fly alternate protein", "black soldier fly fertilizer", "black soldier fly egg", "hermetia illucens", "black soldier fly research"]
+RELEVANT_KEYWORDS = [
+    "black soldier fly", "insect protein", "black soldier fly larvae",
+    "black soldier fly protein", "black soldier fly oil", "black soldier fly feed",
+    "black soldier fly fat", "black soldier fly frass", "black soldier fly substrate",
+    "black soldier fly alternate protein", "black soldier fly fertilizer",
+    "black soldier fly egg", "hermetia illucens", "black soldier fly research"
+]
 
 def get_newsapi(query, max_results=5):
     news_list = []
@@ -63,7 +77,6 @@ def get_newsapi(query, max_results=5):
 
     return news_list
 
-
 # --- RSS feeds ---
 def get_rss():
     news_list = []
@@ -93,7 +106,6 @@ def get_rss():
 
     return news_list
 
-
 # --- Job to run periodically ---
 def job():
     all_news = []
@@ -117,6 +129,43 @@ def run_schedule():
         schedule.run_pending()
         time.sleep(60)
 
+# ---- Telegram Bot Listener ----
+def run_bot():
+    """Poll Telegram for new messages and respond to commands"""
+    last_update_id = None
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
+            if last_update_id:
+                url += f"?offset={last_update_id + 1}"
+            resp = requests.get(url, timeout=10).json()
+
+            for update in resp.get("result", []):
+                last_update_id = update["update_id"]
+                message = update.get("message")
+                if not message:
+                    continue
+
+                chat_id = message["chat"]["id"]
+                text = message.get("text", "").lower()
+
+                if text == "/start":
+                    send_message("👋 Hello! I will keep you updated with Black Soldier Fly news. Type /news anytime to fetch the latest.", chat_id)
+                elif text == "/news":
+                    results = []
+                    for query in TOPIC_QUERIES:
+                        results.extend(get_newsapi(query.strip()))
+                    results.extend(get_rss())
+                    if results:
+                        send_message("\n\n".join(results[:5]), chat_id)
+                    else:
+                        send_message("⚠️ No fresh news found right now.", chat_id)
+
+        except Exception as e:
+            print("⚠️ Bot polling error:", e)
+
+        time.sleep(5)
+
 # ---- Flask server (keeps Render alive) ----
 app = Flask("")
 
@@ -127,7 +176,8 @@ def home():
 def run_flask():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
-# ---- Start both threads ----
+# ---- Start all threads ----
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     Thread(target=run_schedule).start()
+    Thread(target=run_bot).start()   # 👈 new thread to handle user commands
