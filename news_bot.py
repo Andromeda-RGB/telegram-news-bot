@@ -12,7 +12,7 @@ CHAT_ID = os.getenv("CHAT_ID")          # Set this in Render environment
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")  # Set this in Render environment
 
 # Comma-separated search queries
-TOPIC_QUERIES = os.getenv("TOPIC", "BSF research,BSF companies,Black Soldier Fly news").split(",")
+TOPIC_QUERIES = os.getenv("TOPIC", "Black soldier fly research,black soldier fly companies,Black Soldier Fly news, hermetia illucens, black soldier fly protein, black soldier fly frass, black soldier fly oil").split(",")
 
 # Optional RSS feeds
 RSS_FEEDS = os.getenv("RSS_FEEDS", "").split(",")  # e.g., "https://www.bsf-company.com/rss,https://www.industrynews.com/rss"
@@ -29,7 +29,7 @@ def send_message(text: str):
         print("⚠️ Error sending message:", e)
 
 # --- NewsAPI ---
-RELEVANT_KEYWORDS = ["black soldier fly", "insect protein", "bsf larvae", "bsf research"]
+RELEVANT_KEYWORDS = ["black soldier fly", "insect protein", "black soldier fly larvae","black soldier fly protein","black soldier fly oil",black soldier fly feed","black soldier fly fat","black soldier fly frass","black soldier fly substrate","black soldier fly alternate protein","black soldier fly fertilizer","black soldier fly egg","hermetia illucens" "black soldier fly research"]
 
 def get_newsapi(query, max_results=5):
     news_list = []
