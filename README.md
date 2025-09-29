@@ -1,16 +1,18 @@
-# Telegram News Bot
+# Telegram News Bot (RSS + NewsAPI)
 
-A simple Python bot that fetches news from [NewsAPI](https://newsapi.org) and posts to a Telegram group automatically.
+A Telegram bot that scrapes latest news and articles from RSS feeds and NewsAPI, and sends them to your Telegram chat.
+
+## Features
+- Fetches latest news/articles from:
+  - NewsAPI (keyword-based queries)
+  - RSS feeds (company or industry news)
+- Avoids duplicate posts
+- Sends updates periodically (every hour)
+- Hosted on Render with Flask + scheduler
 
 ## Setup
 
-1. Create a Telegram bot with [BotFather](https://core.telegram.org/bots#botfather).
-2. Get your group chat ID.
-3. Get a free API key from [NewsAPI](https://newsapi.org).
-
-## Customizing the topic
-
-In `news_bot.py`, look for this line:
-
-```python
-news_text = get_news("BSF companies research", max_results=3)
+1. **Clone the repo**
+```bash
+git clone <repo-url>
+cd <repo-folder>
