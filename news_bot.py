@@ -29,25 +29,40 @@ def send_message(text: str):
         print("⚠️ Error sending message:", e)
 
 # --- NewsAPI ---
+RELEVANT_KEYWORDS = ["black soldier fly", "insect protein", "bsf larvae", "bsf research"]
+
 def get_newsapi(query, max_results=5):
     news_list = []
     if not NEWS_API_KEY:
         return news_list
+
     url = (
         f"https://newsapi.org/v2/everything?"
         f"q={query}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize={max_results}"
     )
+
     try:
         response = requests.get(url, timeout=10).json()
         articles = response.get("articles", [])
         for a in articles:
+            text_to_check = (a.get("title", "") + " " + a.get("description", "")).lower()
+
+            # Skip duplicates
             if a['url'] in posted_urls:
                 continue
+
+            # Filter by keywords
+            if not any(k.lower() in text_to_check for k in RELEVANT_KEYWORDS):
+                continue  # skip unrelated articles
+
             news_list.append(f"📰 {a['title']} \n🔗 {a['url']}")
             posted_urls.add(a['url'])
+
     except Exception as e:
         print(f"⚠️ NewsAPI error: {e}")
+
     return news_list
+
 
 # --- RSS feeds ---
 def get_rss():
@@ -59,14 +74,25 @@ def get_rss():
             feed = feedparser.parse(feed_url)
             for entry in feed.entries[:3]:
                 url = entry.link
+                title = entry.title
+                text_to_check = title.lower()
+
+                # Skip duplicates
                 if url in posted_urls:
                     continue
-                title = entry.title
+
+                # Filter by keywords
+                if not any(k.lower() in text_to_check for k in RELEVANT_KEYWORDS):
+                    continue  # skip unrelated entries
+
                 news_list.append(f"📰 {title} \n🔗 {url}")
                 posted_urls.add(url)
+
         except Exception as e:
             print(f"⚠️ RSS error ({feed_url}): {e}")
+
     return news_list
+
 
 # --- Job to run periodically ---
 def job():
