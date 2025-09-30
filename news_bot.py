@@ -176,6 +176,11 @@ def home():
 def run_flask():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
+@app.route("/run-job")
+def run_job():
+    job()
+    return "Job executed ✅"
+
 # ---- Start all threads ----
 if __name__ == "__main__":
     Thread(target=run_flask).start()
