@@ -47,10 +47,10 @@ RELEVANT_KEYWORDS = [
 ]
 
 def get_newsapi(query, max_results=5):
+    """Fetch articles from NewsAPI for a single query"""
     news_list = []
     if not NEWS_API_KEY:
         print("⚠️ NEWS_API_KEY not set, skipping NewsAPI fetch.")
-        send_message("⚠️ NEWS_API_KEY not set — cannot fetch news.")
         return news_list
 
     url = (
@@ -63,11 +63,12 @@ def get_newsapi(query, max_results=5):
         response = requests.get(url, timeout=10).json()
         print("   Raw NewsAPI response:", response)
 
+        if response.get("status") != "ok":
+            print(f"⚠️ NewsAPI error: {response.get('code')} - {response.get('message')}")
+            return news_list
+
         articles = response.get("articles", [])
         print(f"   → Got {len(articles)} articles back")
-
-        if not articles:
-            send_message(f"✅ Job ran for '{query}' but no articles found.")
 
         for a in articles:
             text_to_check = (a.get("title", "") + " " + a.get("description", "")).lower()
@@ -86,13 +87,13 @@ def get_newsapi(query, max_results=5):
             print(f"   ✅ Added: {a['title']}")
 
     except Exception as e:
-        print(f"⚠️ NewsAPI error: {e}")
-        send_message(f"⚠️ NewsAPI request failed for '{query}': {e}")
+        print(f"⚠️ NewsAPI request failed: {e}")
 
     return news_list
 
 # --- RSS feeds ---
 def get_rss():
+    """Fetch articles from RSS feeds"""
     news_list = []
     for feed_url in RSS_FEEDS:
         if not feed_url.strip():
@@ -129,16 +130,18 @@ def job():
     print("🔄 Running scheduled job...")
     all_news = []
 
+    # Collect NewsAPI articles for all queries
     for query in TOPIC_QUERIES:
-        results = get_newsapi(query.strip())
-        all_news.extend(results)
+        all_news.extend(get_newsapi(query.strip()))
 
-    rss_news = get_rss()
-    all_news.extend(rss_news)
+    # Collect RSS articles
+    all_news.extend(get_rss())
 
+    # Prepare single summary message
     if all_news:
-        print(f"✅ Sending {len(all_news)} news items")
-        send_message("\n\n".join(all_news[:5]))
+        msg = "\n\n".join(all_news[:5])
+        print(f"✅ Sending {len(all_news)} news items in one message")
+        send_message(msg)
     else:
         print("⚠️ No new news to post at this time.")
         send_message("✅ Job ran, but no new news found this time.")
@@ -147,7 +150,7 @@ def job():
 schedule.every(1).hours.do(job)
 
 def run_schedule():
-    job()  # send immediately on start
+    job()  # run immediately on start
     while True:
         schedule.run_pending()
         time.sleep(60)
