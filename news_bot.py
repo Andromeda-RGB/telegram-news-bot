@@ -7,9 +7,9 @@ from flask import Flask
 import feedparser
 
 # ---- Telegram bot setup ----
-TOKEN = os.getenv("BOT_TOKEN")          # Set this in Render environment
-CHAT_ID = os.getenv("CHAT_ID")          # Set this in Render environment
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")  # Set this in Render environment
+TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
 # Comma-separated search queries
 TOPIC_QUERIES = os.getenv(
@@ -23,13 +23,8 @@ RSS_FEEDS = os.getenv("RSS_FEEDS", "").split(",")
 posted_urls = set()  # track posted URLs
 
 def send_message(text: str, chat_id: str = None):
-    """Send message to Telegram chat"""
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id or CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
+    payload = {"chat_id": chat_id or CHAT_ID, "text": text, "parse_mode": "HTML"}
     try:
         print(f"👉 Sending message to {chat_id or CHAT_ID}: {text[:80]}...")
         r = requests.post(url, data=payload, timeout=10)
@@ -47,7 +42,6 @@ RELEVANT_KEYWORDS = [
 ]
 
 def get_newsapi(query, max_results=5):
-    """Fetch articles from NewsAPI for a single query"""
     news_list = []
     if not NEWS_API_KEY:
         print("⚠️ NEWS_API_KEY not set, skipping NewsAPI fetch.")
@@ -64,45 +58,44 @@ def get_newsapi(query, max_results=5):
         print("   Raw NewsAPI response:", response)
 
         if response.get("status") != "ok":
-            print(f"⚠️ NewsAPI error: {response.get('code')} - {response.get('message')}")
+            code = response.get("code", "unknown")
+            msg = response.get("message", "")
+            print(f"⚠️ NewsAPI error: {code} - {msg}")
             return news_list
 
         articles = response.get("articles", [])
         print(f"   → Got {len(articles)} articles back")
-
         for a in articles:
             text_to_check = (a.get("title", "") + " " + a.get("description", "")).lower()
-
             if a['url'] in posted_urls:
                 print(f"   ↩️ Skipping duplicate: {a['title']}")
                 continue
-
             if not any(k.lower() in text_to_check for k in RELEVANT_KEYWORDS):
                 print(f"   ❌ Skipping unrelated: {a['title']}")
                 continue
-
             news_item = f"📰 {a['title']} \n🔗 {a['url']}"
             news_list.append(news_item)
             posted_urls.add(a['url'])
             print(f"   ✅ Added: {a['title']}")
 
     except Exception as e:
-        print(f"⚠️ NewsAPI request failed: {e}")
+        print(f"⚠️ NewsAPI exception: {e}")
 
     return news_list
 
 # --- RSS feeds ---
 def get_rss():
-    """Fetch articles from RSS feeds"""
     news_list = []
+    print("🔍 RSS_FEEDS:", RSS_FEEDS)
     for feed_url in RSS_FEEDS:
-        if not feed_url.strip():
+        feed_url = feed_url.strip()
+        if not feed_url:
             continue
         try:
             print(f"📡 Fetching RSS: {feed_url}")
             feed = feedparser.parse(feed_url)
-            print(f"   → {len(feed.entries)} entries found")
-            for entry in feed.entries[:3]:
+            print(f"   → {len(feed.entries)} entries found in RSS")
+            for entry in feed.entries[:5]:
                 url = entry.link
                 title = entry.title
                 text_to_check = title.lower()
@@ -110,11 +103,9 @@ def get_rss():
                 if url in posted_urls:
                     print(f"   ↩️ Skipping duplicate RSS: {title}")
                     continue
-
                 if not any(k.lower() in text_to_check for k in RELEVANT_KEYWORDS):
                     print(f"   ❌ Skipping unrelated RSS: {title}")
                     continue
-
                 news_item = f"📰 {title} \n🔗 {url}"
                 news_list.append(news_item)
                 posted_urls.add(url)
@@ -130,34 +121,33 @@ def job():
     print("🔄 Running scheduled job...")
     all_news = []
 
-    # Collect NewsAPI articles for all queries
+    newsapi_count = 0
     for query in TOPIC_QUERIES:
-        all_news.extend(get_newsapi(query.strip()))
+        results = get_newsapi(query.strip())
+        all_news.extend(results)
+        newsapi_count += len(results)
 
-    # Collect RSS articles
-    all_news.extend(get_rss())
+    rss_news = get_rss()
+    all_news.extend(rss_news)
+    rss_count = len(rss_news)
 
-    # Prepare single summary message
+    summary_msg = f"✅ Job finished.\nNewsAPI articles: {newsapi_count}\nRSS articles: {rss_count}"
     if all_news:
-        msg = "\n\n".join(all_news[:5])
-        print(f"✅ Sending {len(all_news)} news items in one message")
-        send_message(msg)
+        send_message("\n\n".join(all_news[:10]) + "\n\n" + summary_msg)
     else:
-        print("⚠️ No new news to post at this time.")
-        send_message("✅ Job ran, but no new news found this time.")
+        send_message(summary_msg + "\nNo new articles found.")
 
 # ---- Scheduler ----
 schedule.every(1).hours.do(job)
 
 def run_schedule():
-    job()  # run immediately on start
+    job()  # send immediately on start
     while True:
         schedule.run_pending()
         time.sleep(60)
 
 # ---- Telegram Bot Listener ----
 def run_bot():
-    """Poll Telegram for new messages and respond to commands"""
     last_update_id = None
     while True:
         try:
@@ -177,14 +167,17 @@ def run_bot():
                 print(f"💬 Received message: {text} from chat {chat_id}")
 
                 if text == "/start":
-                    send_message("👋 Hello! I will keep you updated with Black Soldier Fly news. Type /news anytime to fetch the latest.", chat_id)
+                    send_message(
+                        "👋 Hello! I will keep you updated with Black Soldier Fly news. Type /news anytime to fetch the latest.",
+                        chat_id
+                    )
                 elif text == "/news":
                     results = []
                     for query in TOPIC_QUERIES:
                         results.extend(get_newsapi(query.strip()))
                     results.extend(get_rss())
                     if results:
-                        send_message("\n\n".join(results[:5]), chat_id)
+                        send_message("\n\n".join(results[:10]), chat_id)
                     else:
                         send_message("⚠️ No fresh news found right now.", chat_id)
 
@@ -210,18 +203,6 @@ def run_flask():
 
 # ---- Start all threads ----
 if __name__ == "__main__":
-    threads = [
-        Thread(target=run_flask),
-        Thread(target=run_schedule),
-        Thread(target=run_bot)
-    ]
-
-    for t in threads:
-        t.start()
-
-    # Keep main thread alive so Render doesn't kill the app
-    try:
-        while True:
-            time.sleep(60)
-    except KeyboardInterrupt:
-        print("Shutting down gracefully...")
+    Thread(target=run_flask).start()
+    Thread(target=run_schedule).start()
+    Thread(target=run_bot).start()
