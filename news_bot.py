@@ -18,7 +18,7 @@ TOPIC_QUERIES = os.getenv(
 ).split(",")
 
 # Optional RSS feeds
-RSS_FEEDS = os.getenv("RSS_FEEDS", "").split(",")  # e.g., "https://www.bsf-company.com/rss,https://www.industrynews.com/rss"
+RSS_FEEDS = os.getenv("RSS_FEEDS", "").split(",")
 
 posted_urls = set()  # track posted URLs
 
@@ -31,8 +31,9 @@ def send_message(text: str, chat_id: str = None):
         "parse_mode": "HTML"
     }
     try:
+        print(f"👉 Sending message to {chat_id or CHAT_ID}: {text[:80]}...")
         r = requests.post(url, data=payload, timeout=10)
-        print("📤 Sent message:", r.json())
+        print("📤 Telegram response:", r.json())
     except Exception as e:
         print("⚠️ Error sending message:", e)
 
@@ -48,6 +49,7 @@ RELEVANT_KEYWORDS = [
 def get_newsapi(query, max_results=5):
     news_list = []
     if not NEWS_API_KEY:
+        print("⚠️ NEWS_API_KEY not set, skipping NewsAPI fetch.")
         return news_list
 
     url = (
@@ -56,21 +58,25 @@ def get_newsapi(query, max_results=5):
     )
 
     try:
+        print(f"🔍 Querying NewsAPI for: {query}")
         response = requests.get(url, timeout=10).json()
         articles = response.get("articles", [])
+        print(f"   → Got {len(articles)} articles back")
         for a in articles:
             text_to_check = (a.get("title", "") + " " + a.get("description", "")).lower()
 
-            # Skip duplicates
             if a['url'] in posted_urls:
+                print(f"   ↩️ Skipping duplicate: {a['title']}")
                 continue
 
-            # Filter by keywords
             if not any(k.lower() in text_to_check for k in RELEVANT_KEYWORDS):
-                continue  # skip unrelated articles
+                print(f"   ❌ Skipping unrelated: {a['title']}")
+                continue
 
-            news_list.append(f"📰 {a['title']} \n🔗 {a['url']}")
+            news_item = f"📰 {a['title']} \n🔗 {a['url']}"
+            news_list.append(news_item)
             posted_urls.add(a['url'])
+            print(f"   ✅ Added: {a['title']}")
 
     except Exception as e:
         print(f"⚠️ NewsAPI error: {e}")
@@ -84,22 +90,26 @@ def get_rss():
         if not feed_url.strip():
             continue
         try:
+            print(f"📡 Fetching RSS: {feed_url}")
             feed = feedparser.parse(feed_url)
+            print(f"   → {len(feed.entries)} entries found")
             for entry in feed.entries[:3]:
                 url = entry.link
                 title = entry.title
                 text_to_check = title.lower()
 
-                # Skip duplicates
                 if url in posted_urls:
+                    print(f"   ↩️ Skipping duplicate RSS: {title}")
                     continue
 
-                # Filter by keywords
                 if not any(k.lower() in text_to_check for k in RELEVANT_KEYWORDS):
-                    continue  # skip unrelated entries
+                    print(f"   ❌ Skipping unrelated RSS: {title}")
+                    continue
 
-                news_list.append(f"📰 {title} \n🔗 {url}")
+                news_item = f"📰 {title} \n🔗 {url}"
+                news_list.append(news_item)
                 posted_urls.add(url)
+                print(f"   ✅ Added RSS: {title}")
 
         except Exception as e:
             print(f"⚠️ RSS error ({feed_url}): {e}")
@@ -108,15 +118,19 @@ def get_rss():
 
 # --- Job to run periodically ---
 def job():
+    print("🔄 Running scheduled job...")
     all_news = []
 
     for query in TOPIC_QUERIES:
-        all_news.extend(get_newsapi(query.strip()))
+        results = get_newsapi(query.strip())
+        all_news.extend(results)
 
-    all_news.extend(get_rss())
+    rss_news = get_rss()
+    all_news.extend(rss_news)
 
     if all_news:
-        send_message("\n\n".join(all_news))
+        print(f"✅ Sending {len(all_news)} news items")
+        send_message("\n\n".join(all_news[:5]))
     else:
         print("⚠️ No new news to post at this time.")
 
@@ -148,6 +162,7 @@ def run_bot():
 
                 chat_id = message["chat"]["id"]
                 text = message.get("text", "").lower()
+                print(f"💬 Received message: {text} from chat {chat_id}")
 
                 if text == "/start":
                     send_message("👋 Hello! I will keep you updated with Black Soldier Fly news. Type /news anytime to fetch the latest.", chat_id)
@@ -185,4 +200,4 @@ def run_job():
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     Thread(target=run_schedule).start()
-    Thread(target=run_bot).start()   # 👈 new thread to handle user commands
+    Thread(target=run_bot).start()
