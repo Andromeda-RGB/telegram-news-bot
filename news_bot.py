@@ -2,7 +2,6 @@ import os
 import time
 import requests
 import schedule
-import difflib
 from threading import Thread
 from flask import Flask
 import feedparser
@@ -15,71 +14,58 @@ NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 # Topics / Keywords
 TOPIC_QUERIES = os.getenv(
     "TOPIC",
-    "Black soldier fly research,black soldier fly companies,Black Soldier Fly news, hermetia illucens, black soldier fly protein, black soldier fly frass, black soldier fly oil"
+    "Black soldier fly research,black soldier fly companies,Black Soldier Fly news,hermetia illucens,black soldier fly protein,black soldier fly frass,black soldier fly oil"
 ).split(",")
 
-# Feeds
+# RSS Feeds (multiple categories)
 RSS_FEEDS = os.getenv("RSS_FEEDS", "").split(",")
 RESEARCH_FEEDS = os.getenv("RESEARCH_FEEDS", "").split(",")
 COMPANY_FEEDS = os.getenv("COMPANY_FEEDS", "").split(",")
 SOCIAL_FEEDS = os.getenv("SOCIAL_FEEDS", "").split(",")
 
 posted_urls = set()
+RELEVANT_KEYWORDS = [k.lower().strip() for k in TOPIC_QUERIES if k.strip()]
 
 # ---- Telegram ----
 def send_message(text: str, chat_id: str = None):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {"chat_id": chat_id or CHAT_ID, "text": text, "parse_mode": "HTML"}
     try:
-        print(f"Sending message: {text[:80]}...")
         r = requests.post(url, data=payload, timeout=10)
         print("Telegram response:", r.json())
     except Exception as e:
         print("Error sending message:", e)
 
-# ---- Keyword Matching ----
-RELEVANT_KEYWORDS = [k.lower().strip() for k in TOPIC_QUERIES]
-
-def matches_keywords(text: str) -> bool:
-    """Check if text matches any relevant keyword (fuzzy)."""
-    text = text.lower()
-    for kw in RELEVANT_KEYWORDS:
-        if kw in text:
-            return True
-        # fuzzy match: similarity > 0.7
-        ratio = difflib.SequenceMatcher(None, kw, text).quick_ratio()
-        if ratio > 0.7:
-            return True
-    return False
+def send_long_message(text, chat_id):
+    """Split long messages into multiple chunks for Telegram (max 4096 chars)."""
+    MAX_LENGTH = 4000
+    chunks = [text[i:i+MAX_LENGTH] for i in range(0, len(text), MAX_LENGTH)]
+    for chunk in chunks:
+        send_message(chunk, chat_id)
 
 # ---- NewsAPI ----
 def get_newsapi(query, max_results=5):
     news_list = []
     if not NEWS_API_KEY:
-        print("NEWS_API_KEY not set, skipping NewsAPI.")
         return news_list
 
     url = f"https://newsapi.org/v2/everything?q={query}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize={max_results}"
 
     try:
-        print(f"🔍 Querying NewsAPI for: {query}")
         response = requests.get(url, timeout=10).json()
-
         if response.get("status") != "ok":
-            print(f"⚠️ NewsAPI error: {response}")
             return news_list
 
-        articles = response.get("articles", [])
-        print(f"   → Got {len(articles)} articles back")
-
-        for a in articles:
-            url_link = a['url']
-            title = a.get('title', '')
-            text_check = (title + ' ' + a.get('description', '')).lower()
+        for a in response.get("articles", []):
+            url_link = a["url"]
+            title = a.get("title", "")
+            desc = a.get("description", "")
+            content = a.get("content", "")
+            text_check = f"{title} {desc} {content}".lower()
 
             if url_link in posted_urls:
                 continue
-            if not matches_keywords(text_check):
+            if not any(k in text_check for k in RELEVANT_KEYWORDS):
                 continue
 
             news_list.append(f"📰 {title}\n🔗 {url_link}")
@@ -100,13 +86,12 @@ def get_rss(feeds, category_name):
                 url = entry.link
                 title = entry.title
                 summary = getattr(entry, "summary", "")
-                text_check = (title + " " + summary).lower()
-
-                print(f"Fetched entry: {title} -> {url}")
+                content = " ".join(c.get("value", "") for c in entry.get("content", [])) if hasattr(entry, "content") else ""
+                text_check = f"{title} {summary} {content}".lower()
 
                 if url in posted_urls:
                     continue
-                if not matches_keywords(text_check):
+                if not any(k in text_check for k in RELEVANT_KEYWORDS):
                     continue
 
                 news_list.append(f"{category_name} {title}\n🔗 {url}")
@@ -115,32 +100,77 @@ def get_rss(feeds, category_name):
             print(f"RSS error ({feed_url}): {e}")
     return news_list
 
-# ---- Scheduled Job ----
-def job():
-    print("⏰ Running scheduled job...")
-    all_news = []
+# ---- Debug Command ----
+def debug_dump(chat_id):
+    debug_texts = []
 
     # NewsAPI
     for query in TOPIC_QUERIES:
+        try:
+            url = f"https://newsapi.org/v2/everything?q={query}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize=10"
+            response = requests.get(url, timeout=10).json()
+            debug_texts.append(f"\n\n🔎 <b>NewsAPI Query: {query}</b>")
+            for a in response.get("articles", []):
+                title = a.get("title", "")
+                url_link = a.get("url", "")
+                desc = a.get("description", "")
+                content = a.get("content", "")
+                text_check = f"{title} {desc} {content}".lower()
+                match = "✅" if any(k in text_check for k in RELEVANT_KEYWORDS) else "❌"
+                debug_texts.append(f"{match} {title}\n🔗 {url_link}")
+        except Exception as e:
+            debug_texts.append(f"⚠️ NewsAPI error for {query}: {e}")
+
+    # RSS/Research/Company/Social
+    for feeds, label in [
+        (RSS_FEEDS, "📰 RSS"),
+        (RESEARCH_FEEDS, "📄 Research"),
+        (COMPANY_FEEDS, "🏢 Company"),
+        (SOCIAL_FEEDS, "💬 Social"),
+    ]:
+        for feed_url in feeds:
+            if not feed_url.strip():
+                continue
+            try:
+                feed = feedparser.parse(feed_url)
+                debug_texts.append(f"\n\n🔎 <b>{label} Feed:</b> {feed_url}")
+                for entry in feed.entries[:10]:
+                    title = entry.title
+                    url = entry.link
+                    summary = getattr(entry, "summary", "")
+                    content = " ".join(c.get("value", "") for c in entry.get("content", [])) if hasattr(entry, "content") else ""
+                    text_check = f"{title} {summary} {content}".lower()
+                    match = "✅" if any(k in text_check for k in RELEVANT_KEYWORDS) else "❌"
+                    debug_texts.append(f"{match} {title}\n🔗 {url}")
+            except Exception as e:
+                debug_texts.append(f"⚠️ {label} error ({feed_url}): {e}")
+
+    send_long_message("\n".join(debug_texts), chat_id)
+
+# ---- Scheduled Job ----
+def job():
+    print("Running scheduled job...")
+    all_news = []
+
+    for query in TOPIC_QUERIES:
         all_news.extend(get_newsapi(query.strip()))
 
-    # RSS Feeds
-    all_news.extend(get_rss(RSS_FEEDS, '📰'))
-    all_news.extend(get_rss(RESEARCH_FEEDS, '📄 Research:'))
-    all_news.extend(get_rss(COMPANY_FEEDS, '🏢 Company:'))
-    all_news.extend(get_rss(SOCIAL_FEEDS, '💬 Social:'))
+    all_news.extend(get_rss(RSS_FEEDS, "📰"))
+    all_news.extend(get_rss(RESEARCH_FEEDS, "📄 Research:"))
+    all_news.extend(get_rss(COMPANY_FEEDS, "🏢 Company:"))
+    all_news.extend(get_rss(SOCIAL_FEEDS, "💬 Social:"))
 
     if all_news:
         message = "\n\n".join(all_news[:10])
         send_message(message)
     else:
-        send_message("✅ Job ran, no new articles found.")
+        send_message("✅ Job ran, no new keyword-matching articles found.")
 
 # ---- Scheduler ----
 schedule.every(1).hours.do(job)
 
 def run_schedule():
-    job()  # run once at startup
+    job()
     while True:
         schedule.run_pending()
         time.sleep(60)
@@ -156,9 +186,6 @@ def home():
 def run_job():
     job()
     return "Job executed ✅"
-
-def run_flask():
-    app.run(host="0.0.0.0", port=5000)
 
 # ---- Telegram Listener ----
 def run_bot():
@@ -184,21 +211,24 @@ def run_bot():
                     results = []
                     for query in TOPIC_QUERIES:
                         results.extend(get_newsapi(query.strip()))
-                    results.extend(get_rss(RSS_FEEDS, '📰'))
-                    results.extend(get_rss(RESEARCH_FEEDS, '📄 Research:'))
-                    results.extend(get_rss(COMPANY_FEEDS, '🏢 Company:'))
-                    results.extend(get_rss(SOCIAL_FEEDS, '💬 Social:'))
-
+                    results.extend(get_rss(RSS_FEEDS, "📰"))
+                    results.extend(get_rss(RESEARCH_FEEDS, "📄 Research:"))
+                    results.extend(get_rss(COMPANY_FEEDS, "🏢 Company:"))
+                    results.extend(get_rss(SOCIAL_FEEDS, "💬 Social:"))
                     if results:
                         send_message("\n\n".join(results[:10]), chat_id)
                     else:
-                        send_message("✅ No new articles found.", chat_id)
+                        send_message("✅ No new keyword-matching articles.", chat_id)
+                elif text == "/debug":
+                    send_message("🔍 Debugging… fetching all sources.", chat_id)
+                    debug_dump(chat_id)
+
         except Exception as e:
             print("Bot polling error:", e)
         time.sleep(5)
 
 # ---- Start threads ----
 if __name__ == "__main__":
-    Thread(target=run_flask).start()
     Thread(target=run_schedule).start()
     Thread(target=run_bot).start()
+    app.run(host="0.0.0.0", port=5000)
