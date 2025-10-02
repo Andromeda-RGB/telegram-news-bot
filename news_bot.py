@@ -2,6 +2,7 @@ import os
 import time
 import requests
 import schedule
+import difflib
 from threading import Thread
 from flask import Flask
 import feedparser
@@ -17,7 +18,7 @@ TOPIC_QUERIES = os.getenv(
     "Black soldier fly research,black soldier fly companies,Black Soldier Fly news, hermetia illucens, black soldier fly protein, black soldier fly frass, black soldier fly oil"
 ).split(",")
 
-# RSS Feeds
+# Feeds
 RSS_FEEDS = os.getenv("RSS_FEEDS", "").split(",")
 RESEARCH_FEEDS = os.getenv("RESEARCH_FEEDS", "").split(",")
 COMPANY_FEEDS = os.getenv("COMPANY_FEEDS", "").split(",")
@@ -36,9 +37,22 @@ def send_message(text: str, chat_id: str = None):
     except Exception as e:
         print("Error sending message:", e)
 
-# ---- NewsAPI ----
-RELEVANT_KEYWORDS = [k.lower() for k in TOPIC_QUERIES]
+# ---- Keyword Matching ----
+RELEVANT_KEYWORDS = [k.lower().strip() for k in TOPIC_QUERIES]
 
+def matches_keywords(text: str) -> bool:
+    """Check if text matches any relevant keyword (fuzzy)."""
+    text = text.lower()
+    for kw in RELEVANT_KEYWORDS:
+        if kw in text:
+            return True
+        # fuzzy match: similarity > 0.7
+        ratio = difflib.SequenceMatcher(None, kw, text).quick_ratio()
+        if ratio > 0.7:
+            return True
+    return False
+
+# ---- NewsAPI ----
 def get_newsapi(query, max_results=5):
     news_list = []
     if not NEWS_API_KEY:
@@ -48,16 +62,16 @@ def get_newsapi(query, max_results=5):
     url = f"https://newsapi.org/v2/everything?q={query}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&pageSize={max_results}"
 
     try:
-        print(f"Querying NewsAPI for: {query}")
+        print(f"🔍 Querying NewsAPI for: {query}")
         response = requests.get(url, timeout=10).json()
 
         if response.get("status") != "ok":
-            code = response.get("code", "unknown")
-            msg = response.get("message", "")
-            print(f"NewsAPI error: {code} - {msg}")
+            print(f"⚠️ NewsAPI error: {response}")
             return news_list
 
         articles = response.get("articles", [])
+        print(f"   → Got {len(articles)} articles back")
+
         for a in articles:
             url_link = a['url']
             title = a.get('title', '')
@@ -65,10 +79,10 @@ def get_newsapi(query, max_results=5):
 
             if url_link in posted_urls:
                 continue
-            if not any(k in text_check for k in RELEVANT_KEYWORDS):
+            if not matches_keywords(text_check):
                 continue
 
-            news_list.append(f"📰 {title} \n🔗 {url_link}")
+            news_list.append(f"📰 {title}\n🔗 {url_link}")
             posted_urls.add(url_link)
     except Exception as e:
         print(f"Exception NewsAPI: {e}")
@@ -85,14 +99,17 @@ def get_rss(feeds, category_name):
             for entry in feed.entries[:5]:
                 url = entry.link
                 title = entry.title
-                text_check = title.lower()
+                summary = getattr(entry, "summary", "")
+                text_check = (title + " " + summary).lower()
+
+                print(f"Fetched entry: {title} -> {url}")
 
                 if url in posted_urls:
                     continue
-                if not any(k in text_check for k in RELEVANT_KEYWORDS):
+                if not matches_keywords(text_check):
                     continue
 
-                news_list.append(f"{category_name} {title} \n🔗 {url}")
+                news_list.append(f"{category_name} {title}\n🔗 {url}")
                 posted_urls.add(url)
         except Exception as e:
             print(f"RSS error ({feed_url}): {e}")
@@ -100,7 +117,7 @@ def get_rss(feeds, category_name):
 
 # ---- Scheduled Job ----
 def job():
-    print("Running scheduled job...")
+    print("⏰ Running scheduled job...")
     all_news = []
 
     # NewsAPI
@@ -123,7 +140,7 @@ def job():
 schedule.every(1).hours.do(job)
 
 def run_schedule():
-    job()
+    job()  # run once at startup
     while True:
         schedule.run_pending()
         time.sleep(60)
@@ -139,6 +156,9 @@ def home():
 def run_job():
     job()
     return "Job executed ✅"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=5000)
 
 # ---- Telegram Listener ----
 def run_bot():
